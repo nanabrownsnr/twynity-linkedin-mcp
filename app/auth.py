@@ -30,7 +30,7 @@ def get_auth_provider() -> JWTVerifier:
         f"{settings.ACCOUNT_SERVICE_URL.rstrip('/')}"
         f"/{settings.ACCOUNT_SERVICE_JWKS_ENDPOINT.lstrip('/')}"
     )
-    return JWTVerifier(jwks_uri=jwks_url, algorithm="RS256", audience=settings.SERVICE_ID)
+    return JWTVerifier(jwks_uri=jwks_url, algorithm="RS256")
 
 
 async def get_identity(request: Request) -> TwynityIdentity:
@@ -66,7 +66,7 @@ async def get_identity_from_headers(headers: Mapping[str, str]) -> TwynityIdenti
         header = jwt.get_unverified_header(token)
         key = next(key for key in response.json()["keys"] if key.get("kid") == header.get("kid"))
         claims = jwt.decode(
-            token, key, algorithms=["RS256"], audience=settings.SERVICE_ID
+            token, key, algorithms=["RS256"]
         )
     except (httpx.HTTPError, KeyError, StopIteration, JWTError, ValueError) as exc:
         # Log the real cause (signature, audience, JWKS fetch, or kid lookup)
