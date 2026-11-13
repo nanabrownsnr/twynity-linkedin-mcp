@@ -76,7 +76,6 @@ async def get_identity_from_headers(headers: Mapping[str, str]) -> TwynityIdenti
         logging.getLogger(__name__).warning(
             "JWT verification failed for kid=%s service=%s: %s: %s",
             jwt.get_unverified_header(token).get("kid") if token else "?",
-            settings.SERVICE_ID,
             type(exc).__name__,
             exc,
         )
