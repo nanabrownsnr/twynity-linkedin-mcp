@@ -169,7 +169,7 @@ async def linkedin_get_connections(count: int = 50) -> dict:
 
 def register_linkedin_tools(mcp):
     """Register LinkedIn tools with the FastMCP server."""
-    from fastmcp import ToolResult
+    from fastmcp.tools import ToolResult
 
     @mcp.tool(name="linkedin_get_profile", description="Get current user's LinkedIn profile information including name, headline, summary, and profile picture URL")
     async def tool_linkedin_get_profile() -> ToolResult:

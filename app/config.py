@@ -10,7 +10,8 @@ from logging.handlers import TimedRotatingFileHandler
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
+# Load from .env file first, then override with environment variables
+load_dotenv(override=True)
 
 # Put your MCP name here. Keeping this value in one place makes the service
 # identity, display title, and log filenames easy to customise.
@@ -70,18 +71,18 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
 
     # Usage reporting
-    USAGE_REPORT_ENDPOINT: str
+    USAGE_REPORT_ENDPOINT: str = ""
 
     # Account Service
     ACCOUNT_SERVICE_URL: str
     ACCOUNT_SERVICE_JWKS_ENDPOINT: str
     ACCOUNT_SERVICE_JWKS_CACHE_TTL: int
 
-    # License Service
-    LICENSE_KEY: str
-    LICENSE_SERVER_BASE_URL: str
-    LICENSE_SERVER_JWKS_ENDPOINT: str
-    LICENSE_SERVER_ACTIVATION_ENDPOINT: str
+    # License Service (optional)
+    LICENSE_KEY: str = ""
+    LICENSE_SERVER_BASE_URL: str = ""
+    LICENSE_SERVER_JWKS_ENDPOINT: str = ""
+    LICENSE_SERVER_ACTIVATION_ENDPOINT: str = ""
 
     # --- OAuth 2.0 external connection (Interconnector §10.3) ---------------
     # The provider segment in /api/v1/auth/{provider}/... — set to your service.
