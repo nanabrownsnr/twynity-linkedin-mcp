@@ -8,7 +8,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN pip install uv && uv sync --frozen
 
-|# Copy application code
+# Copy application code
 COPY app/ ./app/
 
 # Expose port 
