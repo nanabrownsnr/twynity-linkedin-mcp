@@ -87,9 +87,7 @@ def register_routes(mcp):
             "version": settings.APP_VERSION,
             # \u00a710.6 \u2014 declare only the categories this MCP implements.
             "external_connections": {
-                "oauth": {"provider": provider},
-                "api_key": None,
-                "project": None,
+                "oauth": {"provider": provider}
             },
         })
 
