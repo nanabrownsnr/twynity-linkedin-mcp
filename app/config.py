@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     OAUTH_SCOPES: str = ""
     # Seconds an unexchanged OAuth `state` session stays valid.
     OAUTH_SESSION_TTL_SECONDS: int = 600
+    # Comma-separated list of trusted frontend callback URLs that the
+    # user's browser may be redirected back to after OAuth completes.
+    FRONTEND_CALLBACK_ALLOWLIST: str = ""
 
 
 settings = Settings()

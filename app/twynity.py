@@ -94,32 +94,44 @@ def register_routes(mcp):
     @mcp.custom_route(f"/api/v1/auth/{provider}/login", methods=["GET"])
     async def auth_login(request: Request) -> JSONResponse:
         identity = await get_identity(request)
-        redirect_uri = _query(request).get("redirect_uri", "").strip()
-        if not redirect_uri:
+        # Frontend URL: where the user's browser should go after OAuth completes.
+        frontend_redirect_uri = _query(request).get("redirect_uri", "").strip()
+        if not frontend_redirect_uri:
             return JSONResponse({"detail": "redirect_uri query parameter is required"}, status_code=422)
+
+        # Validate against allowlist
+        allowed = [u.strip() for u in settings.FRONTEND_CALLBACK_ALLOWLIST.split(",") if u.strip()]
+        if allowed and frontend_redirect_uri not in allowed:
+            return JSONResponse(
+                {"detail": "redirect_uri not in allowed list"},
+                status_code=403,
+            )
+
         store = get_active_store()
         if store is None:
             raise HTTPException(status_code=503, detail="OAuth storage is not available")
-        # Single-use state bound to this user/persona so the callback can
-        # attribute the returned tokens to the right identity pair.
+        # Single-use state bound to this user/persona.
         state = secrets.token_urlsafe(32)
+        # Store BOTH: the backend's OAUTH_REDIRECT_URI (for token exchange)
+        # and the frontend redirect_uri (for post-callback browser redirect).
         await store.save_session(state, {
             "user_id": identity.user_id,
             "persona_id": identity.persona_id,
-            "redirect_uri": redirect_uri,
+            "oauth_redirect_uri": settings.OAUTH_REDIRECT_URI,
+            "frontend_redirect_uri": frontend_redirect_uri,
         })
-        auth_url = _build_authorization_url(state, redirect_uri)
+        # Build LinkedIn authorization URL with the BACKEND redirect URI.
+        auth_url = _build_authorization_url(state, settings.OAUTH_REDIRECT_URI)
         return JSONResponse({
             "authorization_url": auth_url,
             "state": state,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": settings.OAUTH_REDIRECT_URI,
         })
 
     @mcp.custom_route(f"/api/v1/auth/{provider}/token-callback", methods=["POST"])
     async def auth_token_callback(request: Request) -> JSONResponse:
         identity = await get_identity(request)
         query = _query(request)
-        redirect_uri = query.get("redirect_uri", "").strip()
         code = query.get("code", "").strip()
         state = query.get("state", "").strip()
         if not code or not state:
@@ -134,13 +146,15 @@ def register_routes(mcp):
                 status_code=400,
             )
         session_data = session.get("session_data", {})
+        # Use the stored backend redirect URI (not the frontend one) for token exchange.
+        oauth_redirect_uri = session_data.get("oauth_redirect_uri", settings.OAUTH_REDIRECT_URI)
         # Single-use: delete immediately, before the exchange.
         await store.delete_session(state)
         # Attribute the tokens to the identity that initiated the flow.
         user_id = session_data.get("user_id", identity.user_id)
         persona_id = session_data.get("persona_id", identity.persona_id)
         try:
-            token = await _exchange_code(code, redirect_uri)
+            token = await _exchange_code(code, oauth_redirect_uri)
         except HTTPException as exc:
             return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
         expires_in = token.get("expires_in")
@@ -150,7 +164,11 @@ def register_routes(mcp):
             "refresh_token": token.get("refresh_token", ""),
             "expires_at": expires_at,
         })
-        return JSONResponse({"connected": True})
+        # Return the frontend redirect URI so Twynity can navigate the user there.
+        return JSONResponse({
+            "connected": True,
+            "redirect_uri": session_data.get("frontend_redirect_uri", ""),
+        })
 
     @mcp.custom_route(f"/api/v1/auth/{provider}/logout", methods=["POST"])
     async def auth_logout(request: Request) -> JSONResponse:
