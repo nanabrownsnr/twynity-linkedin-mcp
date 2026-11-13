@@ -66,7 +66,7 @@ async def get_identity_from_headers(headers: Mapping[str, str]) -> TwynityIdenti
         header = jwt.get_unverified_header(token)
         key = next(key for key in response.json()["keys"] if key.get("kid") == header.get("kid"))
         claims = jwt.decode(
-            token, key, algorithms=["RS256"]
+            token, key, algorithms=["RS256"], audience=settings.SERVICE_ID
         )
     except (httpx.HTTPError, KeyError, StopIteration, JWTError, ValueError) as exc:
         # Log the real cause (signature, audience, JWKS fetch, or kid lookup)
