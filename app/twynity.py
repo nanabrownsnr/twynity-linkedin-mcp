@@ -73,7 +73,13 @@ async def _exchange_code(code: str, redirect_uri: str) -> dict:
         except Exception:
             detail = resp.text
         raise HTTPException(status_code=502, detail="Token exchange failed: " + str(detail))
-    return resp.json()
+    result = resp.json()
+    # Log the token response for debugging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Token exchange response: {result}")
+    logger.info(f"Access token scopes: {result.get('scope', 'N/A')}")
+    return result
 
 
 def register_routes(mcp):
