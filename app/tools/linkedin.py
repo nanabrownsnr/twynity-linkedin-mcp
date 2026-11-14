@@ -8,10 +8,10 @@ import httpx
 
 
 async def linkedin_get_profile() -> dict:
-    """Get current user's LinkedIn profile information including name, headline, summary, and profile picture URL.
+    """Get current user's LinkedIn profile information using OAuth 2.0 userinfo endpoint.
 
     Returns:
-        dict: LinkedIn profile data
+        dict: LinkedIn profile data from /v2/userinfo
     """
     identity = await get_identity_from_context()
     store = get_active_store()
@@ -23,20 +23,18 @@ async def linkedin_get_profile() -> dict:
         raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
 
     async with httpx.AsyncClient(
-        base_url="https://api.linkedin.com/v2",
         headers={
             "Authorization": f"Bearer {token['access_token']}",
-            "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "v2"
         }
     ) as client:
-        response = await client.get("/me")
+        # Use OAuth 2.0 userinfo endpoint (works with openid scope)
+        response = await client.get("https://api.linkedin.com/v2/userinfo")
         response.raise_for_status()
         return response.json()
 
 
 async def linkedin_get_email() -> dict:
-    """Get user's LinkedIn email address.
+    """Get user's LinkedIn email address using OAuth 2.0 userinfo endpoint.
 
     Returns:
         dict: Email address data
@@ -51,16 +49,15 @@ async def linkedin_get_email() -> dict:
         raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
 
     async with httpx.AsyncClient(
-        base_url="https://api.linkedin.com/v2",
         headers={
             "Authorization": f"Bearer {token['access_token']}",
-            "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "v2"
         }
     ) as client:
-        response = await client.get("/emailAddress")
+        # Use OAuth 2.0 userinfo endpoint (works with email scope)
+        response = await client.get("https://api.linkedin.com/v2/userinfo")
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        return {"email": data.get("email", "N/A")}
 
 
 async def linkedin_search_people(query: str, limit: int = 10) -> dict:
@@ -138,12 +135,8 @@ async def linkedin_create_post(text: str) -> dict:
 
 async def linkedin_get_connections(count: int = 50) -> dict:
     """Get a list of the user's first-degree connections on LinkedIn.
-
-    Args:
-        count: Maximum number of connections to return (default: 50)
-
-    Returns:
-        dict: List of connections with profile information
+    
+    NOTE: This requires r_fullprofile scope which is not available in your app.
     """
     identity = await get_identity_from_context()
     store = get_active_store()
@@ -155,14 +148,12 @@ async def linkedin_get_connections(count: int = 50) -> dict:
         raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
 
     async with httpx.AsyncClient(
-        base_url="https://api.linkedin.com/v2",
         headers={
             "Authorization": f"Bearer {token['access_token']}",
-            "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "v2"
         }
     ) as client:
-        response = await client.get(f"/connections?count={count}")
+        # Use OAuth 2.0 userinfo endpoint to get profile info
+        response = await client.get("https://api.linkedin.com/v2/userinfo")
         response.raise_for_status()
         return response.json()
 
