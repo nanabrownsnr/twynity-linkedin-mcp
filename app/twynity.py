@@ -246,7 +246,10 @@ def register_routes(mcp):
 
     @mcp.custom_route(f"/api/v1/auth/{provider}/logout", methods=["POST"])
     async def auth_logout(request: Request) -> JSONResponse:
-        identity = await get_identity(request)
+        try:
+            identity = await get_identity(request)
+        except Exception:
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
         store = get_active_store()
         if store is None:
             raise HTTPException(status_code=503, detail="OAuth storage is not available")
