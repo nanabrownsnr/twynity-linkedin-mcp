@@ -128,6 +128,74 @@ def register_routes(mcp):
             "redirect_uri": settings.OAUTH_REDIRECT_URI,
         })
 
+    # Direct OAuth callback route for when the provider redirects back
+    @mcp.custom_route("/oauth/callback", methods=["GET"])
+    async def oauth_callback(request: Request) -> JSONResponse:
+        query = _query(request)
+        error = query.get("error")
+        state = query.get("state", "").strip()
+
+        if error:
+            frontend_uri = "unknown"
+            if state:
+                store = get_active_store()
+                if store:
+                    session = await store.get_session(state)
+                    if session:
+                        session_data = session.get("session_data", {})
+                        frontend_uri = session_data.get("frontend_redirect_uri", "unknown")
+            return JSONResponse({
+                "error": error,
+                "error_description": query.get("error_description", "Unknown error"),
+                "state": state,
+                "redirect_uri": frontend_uri,
+            }, status_code=400)
+
+        code = query.get("code", "").strip()
+        if not code or not state:
+            return JSONResponse({"detail": "code and state are required"}, status_code=400)
+
+        store = get_active_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+        session = await store.get_session(state)
+        if not session:
+            return JSONResponse({
+                "error": "invalid_state",
+                "error_description": "Invalid or expired authorization state.",
+            }, status_code=400)
+
+        session_data = session.get("session_data", {})
+        oauth_redirect_uri = session_data.get("oauth_redirect_uri", settings.OAUTH_REDIRECT_URI)
+        frontend_redirect_uri = session_data.get("frontend_redirect_uri", "")
+        user_id = session_data.get("user_id")
+        persona_id = session_data.get("persona_id")
+
+        # Single-use: delete immediately
+        await store.delete_session(state)
+
+        # Exchange code for tokens
+        try:
+            token = await _exchange_code(code, oauth_redirect_uri)
+        except HTTPException as exc:
+            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+        expires_in = token.get("expires_in")
+        expires_at = (time.time() + expires_in) if isinstance(expires_in, (int, float)) else None
+
+        await store.save_token(user_id, persona_id, {
+            "access_token": token.get("access_token", ""),
+            "refresh_token": token.get("refresh_token", ""),
+            "expires_at": expires_at,
+        })
+
+        return JSONResponse({
+            "connected": True,
+            "redirect_uri": frontend_redirect_uri,
+            "state": state,
+        })
+
     @mcp.custom_route(f"/api/v1/auth/{provider}/token-callback", methods=["POST"])
     async def auth_token_callback(request: Request) -> JSONResponse:
         identity = await get_identity(request)
