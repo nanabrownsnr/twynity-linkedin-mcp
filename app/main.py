@@ -13,14 +13,17 @@ from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.middleware import Middleware as MCPMiddleware
 from fastmcp.server.middleware import MiddlewareContext
 from pymongo import AsyncMongoClient
+from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.auth import get_auth_provider
 from app.config import settings
 from app.connection_store import OAuthStore, set_active_store
 from app.license import license_watcher
-from app.twynity import register_routes
+from app.twynity import register_routes, _exchange_code
 from app.tools.linkedin import register_linkedin_tools
 from app.usage import save_usage_report
 
@@ -105,6 +108,77 @@ try:
     logger.info("Registering Twynity routes...")
     register_routes(mcp)
     logger.info("Routes registered")
+
+    # Register direct OAuth callback route (before creating HTTP app)
+    @mcp.server.http.get("/oauth/callback")
+    async def oauth_callback_route(request):
+        """Direct OAuth callback handler for when LinkedIn redirects back."""
+        query = dict(request.query_params)
+        error = query.get("error")
+        state = query.get("state", "").strip()
+
+        if error:
+            frontend_uri = "unknown"
+            if state:
+                store = get_active_store()
+                if store:
+                    session = await store.get_session(state)
+                    if session:
+                        session_data = session.get("session_data", {})
+                        frontend_uri = session_data.get("frontend_redirect_uri", "unknown")
+            return JSONResponse({
+                "error": error,
+                "error_description": query.get("error_description", "Unknown error"),
+                "state": state,
+                "redirect_uri": frontend_uri,
+            }, status_code=400)
+
+        code = query.get("code", "").strip()
+        if not code or not state:
+            return JSONResponse({"detail": "code and state are required"}, status_code=400)
+
+        store = get_active_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+        session = await store.get_session(state)
+        if not session:
+            return JSONResponse({
+                "error": "invalid_state",
+                "error_description": "Invalid or expired authorization state.",
+            }, status_code=400)
+
+        session_data = session.get("session_data", {})
+        oauth_redirect_uri = session_data.get("oauth_redirect_uri", settings.OAUTH_REDIRECT_URI)
+        frontend_redirect_uri = session_data.get("frontend_redirect_uri", "")
+        user_id = session_data.get("user_id")
+        persona_id = session_data.get("persona_id")
+
+        # Single-use: delete immediately
+        await store.delete_session(state)
+
+        # Exchange code for tokens
+        try:
+            token = await _exchange_code(code, oauth_redirect_uri)
+        except HTTPException as exc:
+            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+        expires_in = token.get("expires_in")
+        expires_at = (time.time() + expires_in) if isinstance(expires_in, (int, float)) else None
+
+        await store.save_token(user_id, persona_id, {
+            "access_token": token.get("access_token", ""),
+            "refresh_token": token.get("refresh_token", ""),
+            "expires_at": expires_at,
+        })
+
+        return JSONResponse({
+            "connected": True,
+            "redirect_uri": frontend_redirect_uri,
+            "state": state,
+        })
+
+    logger.info("OAuth callback route registered")
 
     logger.info("Creating HTTP app...")
     origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
