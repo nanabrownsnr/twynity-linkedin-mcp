@@ -390,6 +390,236 @@ async def linkedin_upload_video(text: str, video_url: str) -> dict:
         return response.json()
 
 
+# ============================================================================
+# Organization Management Tools (Community Management API)
+# Requires: w_organization_social, r_organization_social scopes
+# ============================================================================
+
+
+async def linkedin_list_organizations() -> dict:
+    """List all organizations the user is a member of.
+
+    Uses the /organizations endpoint from Community Management API.
+
+    Returns:
+        dict: List of organizations
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    async with httpx.AsyncClient(
+        base_url="https://api.linkedin.com",
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+    ) as client:
+        response = await client.get("/organizations", params={"q": "v1:memberships"})
+        response.raise_for_status()
+        return response.json()
+
+
+async def linkedin_get_organization(organization_id: str) -> dict:
+    """Get detailed information about a specific organization.
+
+    Args:
+        organization_id: Organization ID or urn (e.g., "urn:li:organization:123456")
+
+    Returns:
+        dict: Organization details including name, industry, size, website
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    # Normalize the org ID to full URN format if needed
+    if not organization_id.startswith("urn:li:organization:"):
+        org_urn = f"urn:li:organization:{organization_id}"
+    else:
+        org_urn = organization_id
+
+    async with httpx.AsyncClient(
+        base_url="https://api.linkedin.com",
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+    ) as client:
+        response = await client.get(f"/organizations/{org_urn}")
+        response.raise_for_status()
+        return response.json()
+
+
+async def linkedin_get_post(post_urn: str) -> dict:
+    """Get details of a specific LinkedIn post.
+
+    Args:
+        post_urn: The URN of the post (e.g., "urn:li:ugcPost:123456")
+
+    Returns:
+        dict: Post details including commentary, media, author, likes, comments
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    async with httpx.AsyncClient(
+        base_url="https://api.linkedin.com",
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+    ) as client:
+        response = await client.get(f"/posts/{post_urn}")
+        response.raise_for_status()
+        return response.json()
+
+
+async def linkedin_list_posts(author: str, count: int = 10) -> dict:
+    """List recent posts from a specific author (person or organization).
+
+    Args:
+        author: Author identifier (person ID or org ID)
+        count: Number of posts to retrieve (default 10)
+
+    Returns:
+        dict: List of posts
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    # Normalize to full URN if needed
+    if not author.startswith("urn:"):
+        author = f"urn:li:person:{author}"
+
+    async with httpx.AsyncClient(
+        base_url="https://api.linkedin.com",
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+        }
+    ) as client:
+        response = await client.get(
+            "/posts",
+            params={
+                "q": "feedby",
+                "author": author,
+                "count": count,
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def linkedin_get_member_urn() -> dict:
+    """Get the current user's LinkedIn member URN.
+
+    Returns:
+        dict: Member URN (e.g., "urn:li:person:123456")
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    async with httpx.AsyncClient(
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+        }
+    ) as client:
+        response = await client.get("https://api.linkedin.com/v2/userinfo")
+        response.raise_for_status()
+        data = response.json()
+        # The member URN is constructed from the person ID
+        person_id = data.get("sub", "unknown")
+        return {
+            "member_urn": f"urn:li:person:{person_id}",
+            "person_id": person_id,
+            "email": data.get("email", "N/A"),
+        }
+
+
+async def linkedin_generic_api_request(
+    endpoint: str,
+    method: str = "GET",
+    params: dict | None = None,
+    body: dict | None = None,
+) -> dict:
+    """Make a generic API request to any LinkedIn endpoint.
+
+    This is a catch-all tool for when the user needs to access a LinkedIn
+    endpoint that doesn't have a dedicated tool.
+
+    Args:
+        endpoint: API path (e.g., "/rest/posts", "/v2/me")
+        method: HTTP method (GET, POST, PUT, DELETE)
+        params: Query parameters as dict
+        body: Request body as dict
+
+    Returns:
+        dict: API response
+    """
+    identity = await get_identity_from_context()
+    store = get_active_store()
+    if store is None:
+        raise HTTPException(status_code=503, detail="OAuth storage is not available")
+
+    token = await store.get_token(identity.user_id, identity.persona_id)
+    if not token or not token.get("access_token"):
+        raise HTTPException(status_code=401, detail="LinkedIn connection not authenticated")
+
+    async with httpx.AsyncClient(
+        base_url="https://api.linkedin.com",
+        headers={
+            "Authorization": f"Bearer {token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+            "Content-Type": "application/json",
+        }
+    ) as client:
+        if method.upper() == "GET":
+            response = await client.get(endpoint, params=params)
+        elif method.upper() == "POST":
+            response = await client.post(endpoint, params=params, json=body)
+        elif method.upper() == "PUT":
+            response = await client.put(endpoint, params=params, json=body)
+        elif method.upper() == "DELETE":
+            response = await client.delete(endpoint, params=params)
+        else:
+            raise HTTPException(status_code=422, detail=f"Unsupported method: {method}")
+
+        response.raise_for_status()
+        try:
+            return response.json()
+        except Exception:
+            return {"raw_response": response.text}
+
+
 def register_linkedin_tools(mcp):
     """Register LinkedIn tools with the FastMCP server."""
     from fastmcp.tools import ToolResult
@@ -474,3 +704,66 @@ def register_linkedin_tools(mcp):
         """Create a post with a video"""
         data = await linkedin_upload_video(text, video_url)
         return ToolResult(content=[data], structured_content={"post_created": True, "has_video": True})
+
+    # ============================================================================
+    # NEW: Organization Management & Account Intelligence Tools
+    # ============================================================================
+
+    @mcp.tool(
+        name="linkedin_list_organizations",
+        description="List all LinkedIn organizations the user is a member of. Requires Community Management API."
+    )
+    async def tool_linkedin_list_organizations() -> ToolResult:
+        """List all organizations the user belongs to"""
+        data = await linkedin_list_organizations()
+        return ToolResult(content=[data], structured_content={"organizations": data})
+
+    @mcp.tool(
+        name="linkedin_get_organization",
+        description="Get detailed info about a LinkedIn organization by ID. Requires Community Management API."
+    )
+    async def tool_linkedin_get_organization(organization_id: str) -> ToolResult:
+        """Get organization details"""
+        data = await linkedin_get_organization(organization_id)
+        return ToolResult(content=[data], structured_content={"organization": data})
+
+    @mcp.tool(
+        name="linkedin_get_post",
+        description="Get details of a specific LinkedIn post by its URN."
+    )
+    async def tool_linkedin_get_post(post_urn: str) -> ToolResult:
+        """Get post details"""
+        data = await linkedin_get_post(post_urn)
+        return ToolResult(content=[data], structured_content={"post": data})
+
+    @mcp.tool(
+        name="linkedin_list_posts",
+        description="List recent posts from a specific author (person or organization). Accepts person/org ID or full URN."
+    )
+    async def tool_linkedin_list_posts(author: str, count: int = 10) -> ToolResult:
+        """List posts from an author"""
+        data = await linkedin_list_posts(author, count)
+        return ToolResult(content=[data], structured_content={"posts": data})
+
+    @mcp.tool(
+        name="linkedin_get_member_urn",
+        description="Get the current user's LinkedIn member URN (e.g., urn:li:person:123456)."
+    )
+    async def tool_linkedin_get_member_urn() -> ToolResult:
+        """Get user's member URN"""
+        data = await linkedin_get_member_urn()
+        return ToolResult(content=[data], structured_content=data)
+
+    @mcp.tool(
+        name="linkedin_generic_api_request",
+        description="Make any LinkedIn API request. Specify endpoint, method (GET/POST/PUT/DELETE), params dict, and body dict."
+    )
+    async def tool_linkedin_generic_api_request(
+        endpoint: str,
+        method: str = "GET",
+        params: dict | None = None,
+        body: dict | None = None,
+    ) -> ToolResult:
+        """Generic LinkedIn API call"""
+        data = await linkedin_generic_api_request(endpoint, method, params, body)
+        return ToolResult(content=[data], structured_content={"response": data})
