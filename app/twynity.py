@@ -244,7 +244,7 @@ def register_routes(mcp):
             "redirect_uri": session_data.get("frontend_redirect_uri", ""),
         })
 
-    @mcp.custom_route(f"/api/v1/auth/{provider}/logout", methods=["POST"])
+    @mcp.custom_route(f"/api/v1/auth/{provider}/logout", methods=["GET", "POST"])
     async def auth_logout(request: Request) -> JSONResponse:
         try:
             identity = await get_identity(request)
